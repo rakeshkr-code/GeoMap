@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interactive World Map</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <!-- Leaflet Draw CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; }
+    #map { width: 100%; height: 100%; }
+    #toolbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.9);
+      padding: 10px;
+      border-radius: 4px;
+    }
+    .symbol {
+      cursor: pointer;
+      margin: 5px;
+      width: 32px;
+      height: 32px;
+      vertical-align: middle;
+      border: 2px solid transparent;
+      border-radius: 4px;
+    }
+    .symbol.selected {
+      border-color: #3388ff;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <strong>Choose Symbol:</strong><br />
+    <img src="icons/mountain.png" class="symbol" data-type="mountain" title="Mountain" />
+    <img src="icons/bridge.png" class="symbol" data-type="bridge" title="Bridge" />
+    <img src="icons/lake.png" class="symbol" data-type="lake" title="Lake" />
+  </div>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- Leaflet Draw JS -->
+  <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+  <script>
+    // Initialize map
+    var map = L.map('map').setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Define custom icons (ensure icons are placed in an 'icons' folder)
+    var icons = {
+      mountain: L.icon({ iconUrl: 'icons/mountain.png', iconSize: [32,32] }),
+      bridge:   L.icon({ iconUrl: 'icons/bridge.png', iconSize: [32,32] }),
+      lake:     L.icon({ iconUrl: 'icons/lake.png', iconSize: [32,32] })
+    };
+
+    var selectedType = null;
+
+    // Toolbar click handling
+    document.querySelectorAll('.symbol').forEach(function(el) {
+      el.addEventListener('click', function() {
+        // Toggle selection styling
+        document.querySelectorAll('.symbol').forEach(function(s) { s.classList.remove('selected'); });
+        el.classList.add('selected');
+        selectedType = el.dataset.type;
+      });
+    });
+
+    // Place marker on map click when a symbol is selected
+    map.on('click', function(e) {
+      if (!selectedType) return;
+      var marker = L.marker(e.latlng, { icon: icons[selectedType], draggable: true }).addTo(map);
+      // Bind editable popup
+      marker.bindPopup('<div contenteditable="true" style="min-width:100px;">Enter description...</div>');
+      // Show popup on hover
+      marker.on('mouseover', function() { marker.openPopup(); });
+      marker.on('mouseout',  function() { marker.closePopup(); });
+    });
+
+    // Add drawing controls for lines/polygons
+    var drawnItems = new L.FeatureGroup().addTo(map);
+    var drawControl = new L.Control.Draw({
+      draw: {
+        polyline: true,
+        polygon: true,
+        rectangle: false,
+        circle: false,
+        marker: false,
+        circlemarker: false
+      },
+      edit: { featureGroup: drawnItems }
+    });
+    map.addControl(drawControl);
+
+    map.on(L.Draw.Event.CREATED, function(event) {
+      var layer = event.layer;
+      drawnItems.addLayer(layer);
+      layer.bindPopup('<div contenteditable="true" style="min-width:100px;">Enter description...</div>');
+      layer.on('mouseover', function() { layer.openPopup(); });
+      layer.on('mouseout',  function() { layer.closePopup(); });
+    });
+  </script>
+</body>
+</html>
