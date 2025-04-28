@@ -5,9 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Interactive World Map</title>
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet/dist/leaflet.css"
+  />
   <!-- Leaflet Draw CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"
+  />
+  <!-- HTML2Canvas for snapshots -->
+  <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
     #map { width: 100%; height: 100%; }
@@ -16,30 +24,62 @@
       top: 10px;
       left: 10px;
       z-index: 1000;
-      background: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.95);
       padding: 10px;
       border-radius: 4px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.3);
+      font-family: sans-serif;
     }
+    #toolbar h4 { margin: 0 0 5px; }
     .symbol {
       cursor: pointer;
-      margin: 5px;
+      margin: 2px;
       width: 32px;
       height: 32px;
-      vertical-align: middle;
       border: 2px solid transparent;
       border-radius: 4px;
+      vertical-align: middle;
     }
     .symbol.selected {
       border-color: #3388ff;
+      background: rgba(51,136,255,0.1);
+    }
+    #colorPicker {
+      width: 100%;
+      margin: 5px 0;
+    }
+    #actions button {
+      display: inline-block;
+      margin: 2px;
+      padding: 4px 8px;
+      font-size: 0.9em;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
   <div id="toolbar">
-    <strong>Choose Symbol:</strong><br />
+    <h4>Symbols</h4>
+    <!-- standard list: mountain, bridge, lake, forest, river, city, volcano -->
     <img src="icons/mountain.png" class="symbol" data-type="mountain" title="Mountain" />
     <img src="icons/bridge.png" class="symbol" data-type="bridge" title="Bridge" />
     <img src="icons/lake.png" class="symbol" data-type="lake" title="Lake" />
+    <img src="icons/forest.png" class="symbol" data-type="forest" title="Forest" />
+    <img src="icons/river.png" class="symbol" data-type="river" title="River" />
+    <img src="icons/city.png" class="symbol" data-type="city" title="City" />
+    <img src="icons/volcano.png" class="symbol" data-type="volcano" title="Volcano" />
+    <div><button id="deselect">Deselect</button></div>
+
+    <h4>Region Color</h4>
+    <input type="color" id="colorPicker" value="#3388ff" />
+
+    <h4>Actions</h4>
+    <div id="actions">
+      <button id="snapshotBtn">Save Snapshot</button>
+      <button id="exportBtn">Export JSON</button>
+      <input type="file" id="importInput" accept="application/json" style="display:none" />
+      <button id="importBtn">Import JSON</button>
+    </div>
   </div>
   <div id="map"></div>
 
@@ -54,57 +94,152 @@
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Define custom icons (ensure icons are placed in an 'icons' folder)
+    // Define custom icons (update iconUrl as needed)
     var icons = {
       mountain: L.icon({ iconUrl: 'icons/mountain.png', iconSize: [32,32] }),
       bridge:   L.icon({ iconUrl: 'icons/bridge.png', iconSize: [32,32] }),
-      lake:     L.icon({ iconUrl: 'icons/lake.png', iconSize: [32,32] })
+      lake:     L.icon({ iconUrl: 'icons/lake.png', iconSize: [32,32] }),
+      forest:   L.icon({ iconUrl: 'icons/forest.png', iconSize: [32,32] }),
+      river:    L.icon({ iconUrl: 'icons/river.png', iconSize: [32,32] }),
+      city:     L.icon({ iconUrl: 'icons/city.png', iconSize: [32,32] }),
+      volcano:  L.icon({ iconUrl: 'icons/volcano.png', iconSize: [32,32] })
     };
 
-    var selectedType = null;
+    var selectedSymbol = null;
+    var selectedColor = document.getElementById('colorPicker').value;
+    var markerGroup = new L.FeatureGroup().addTo(map);
+    var drawItems   = new L.FeatureGroup().addTo(map);
 
-    // Toolbar click handling
+    // Symbol selection
     document.querySelectorAll('.symbol').forEach(function(el) {
       el.addEventListener('click', function() {
-        // Toggle selection styling
-        document.querySelectorAll('.symbol').forEach(function(s) { s.classList.remove('selected'); });
-        el.classList.add('selected');
-        selectedType = el.dataset.type;
+        document.querySelectorAll('.symbol').forEach(s => s.classList.remove('selected'));
+        if (selectedSymbol === el.dataset.type) {
+          selectedSymbol = null;
+        } else {
+          el.classList.add('selected');
+          selectedSymbol = el.dataset.type;
+        }
+      });
+    });
+    document.getElementById('deselect').addEventListener('click', function() {
+      document.querySelectorAll('.symbol').forEach(s => s.classList.remove('selected'));
+      selectedSymbol = null;
+    });
+
+    // Color picker for polygons/polylines
+    var drawControl;
+    function initDrawControl() {
+      if (drawControl) map.removeControl(drawControl);
+      drawControl = new L.Control.Draw({
+        draw: {
+          polygon: { shapeOptions: { color: selectedColor } },
+          polyline:{ shapeOptions: { color: selectedColor } },
+          rectangle:false, circle:false, marker:false, circlemarker:false
+        },
+        edit: { featureGroup: drawItems }
+      });
+      map.addControl(drawControl);
+    }
+    initDrawControl();
+    document.getElementById('colorPicker').addEventListener('change', function(e) {
+      selectedColor = e.target.value;
+      initDrawControl();
+    });
+
+    // Place markers
+    map.on('click', function(e) {
+      if (!selectedSymbol) return;
+      var marker = L.marker(e.latlng, {
+        icon: icons[selectedSymbol],
+        draggable: true,
+        symbolType: selectedSymbol
+      }).addTo(markerGroup);
+      var popup = L.popup({ autoClose: false, closeOnClick: false })
+        .setContent('<div contenteditable="true" style="min-width:120px;">Describe...</div>');
+      marker.bindPopup(popup);
+      marker.on('click', function() { marker.openPopup(); });
+    });
+
+    // Handle drawings
+    map.on(L.Draw.Event.CREATED, function(evt) {
+      var layer = evt.layer;
+      drawItems.addLayer(layer);
+      var popup = L.popup({ autoClose: false, closeOnClick: false })
+        .setContent('<div contenteditable="true" style="min-width:120px;">Describe region...</div>');
+      layer.bindPopup(popup);
+      layer.on('click', function() { layer.openPopup(); });
+    });
+
+    // Snapshot
+    document.getElementById('snapshotBtn').addEventListener('click', function() {
+      html2canvas(document.getElementById('map')).then(canvas => {
+        canvas.toBlob(function(blob) {
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'map_snapshot.png';
+          a.click();
+          URL.revokeObjectURL(url);
+        });
       });
     });
 
-    // Place marker on map click when a symbol is selected
-    map.on('click', function(e) {
-      if (!selectedType) return;
-      var marker = L.marker(e.latlng, { icon: icons[selectedType], draggable: true }).addTo(map);
-      // Bind editable popup
-      marker.bindPopup('<div contenteditable="true" style="min-width:100px;">Enter description...</div>');
-      // Show popup on hover
-      marker.on('mouseover', function() { marker.openPopup(); });
-      marker.on('mouseout',  function() { marker.closePopup(); });
+    // Export JSON state
+    document.getElementById('exportBtn').addEventListener('click', function() {
+      var state = { markers: [], shapes: [] };
+      markerGroup.eachLayer(function(m) {
+        var desc = m.getPopup().getContent();
+        state.markers.push({
+          type: m.options.symbolType,
+          latlng: m.getLatLng(),
+          description: desc
+        });
+      });
+      drawItems.eachLayer(function(l) {
+        var geo = l.toGeoJSON();
+        geo.properties = geo.properties || {};
+        geo.properties.description = l.getPopup().getContent();
+        geo.properties.color = l.options.color;
+        state.shapes.push(geo);
+      });
+      var dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(state));
+      var dl = document.createElement('a');
+      dl.setAttribute('href', dataStr);
+      dl.setAttribute('download', 'map_state.json');
+      dl.click();
     });
 
-    // Add drawing controls for lines/polygons
-    var drawnItems = new L.FeatureGroup().addTo(map);
-    var drawControl = new L.Control.Draw({
-      draw: {
-        polyline: true,
-        polygon: true,
-        rectangle: false,
-        circle: false,
-        marker: false,
-        circlemarker: false
-      },
-      edit: { featureGroup: drawnItems }
+    // Import JSON state
+    document.getElementById('importBtn').addEventListener('click', function() {
+      document.getElementById('importInput').click();
     });
-    map.addControl(drawControl);
-
-    map.on(L.Draw.Event.CREATED, function(event) {
-      var layer = event.layer;
-      drawnItems.addLayer(layer);
-      layer.bindPopup('<div contenteditable="true" style="min-width:100px;">Enter description...</div>');
-      layer.on('mouseover', function() { layer.openPopup(); });
-      layer.on('mouseout',  function() { layer.closePopup(); });
+    document.getElementById('importInput').addEventListener('change', function(e) {
+      var file = e.target.files[0];
+      var reader = new FileReader();
+      reader.onload = function(evt) {
+        var data = JSON.parse(evt.target.result);
+        // Clear existing
+        markerGroup.clearLayers();
+        drawItems.clearLayers();
+        // Load markers
+        data.markers.forEach(function(m) {
+          var mk = L.marker(m.latlng, { icon: icons[m.type], draggable: true, symbolType: m.type })
+            .addTo(markerGroup);
+          var pop = L.popup({ autoClose:false, closeOnClick:false }).setContent(m.description);
+          mk.bindPopup(pop);
+          mk.on('click', function() { mk.openPopup(); });
+        });
+        // Load shapes
+        data.shapes.forEach(function(s) {
+          var layer = L.geoJSON(s, { style: { color: s.properties.color }}).getLayers()[0];
+          drawItems.addLayer(layer);
+          var pop = L.popup({ autoClose:false, closeOnClick:false }).setContent(s.properties.description);
+          layer.bindPopup(pop);
+          layer.on('click', function() { layer.openPopup(); });
+        });
+      };
+      reader.readAsText(file);
     });
   </script>
 </body>
