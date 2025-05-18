@@ -1,245 +1,436 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Interactive World Map</title>
-  <!-- Leaflet CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet/dist/leaflet.css"
-  />
-  <!-- Leaflet Draw CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"
-  />
-  <!-- HTML2Canvas for snapshots -->
-  <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Interactive World Map for Students</title>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  <!-- Leaflet.draw CSS & JS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <!-- html2canvas for PNG export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
-    #map { width: 100%; height: 100%; }
-    #toolbar {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 1000;
-      background: rgba(255,255,255,0.95);
-      padding: 10px;
-      border-radius: 4px;
-      box-shadow: 0 0 6px rgba(0,0,0,0.3);
-      font-family: sans-serif;
-    }
-    #toolbar h4 { margin: 0 0 5px; }
-    .symbol {
-      cursor: pointer;
-      margin: 2px;
-      width: 32px;
-      height: 32px;
-      border: 2px solid transparent;
-      border-radius: 4px;
-      vertical-align: middle;
-    }
-    .symbol.selected {
-      border-color: #3388ff;
-      background: rgba(51,136,255,0.1);
-    }
-    #colorPicker {
-      width: 100%;
-      margin: 5px 0;
-    }
-    #actions button {
-      display: inline-block;
-      margin: 2px;
-      padding: 4px 8px;
-      font-size: 0.9em;
-      cursor: pointer;
-    }
+    body, html { margin:0; padding:0; height:100%; font-family:Arial,sans-serif; }
+    #map-container { position:relative; height:100vh; width:100%; }
+    #map { position:absolute; top:0; bottom:0; right:0; left:0; }
+    .map-loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+                   background:white; padding:10px 20px; border-radius:4px; box-shadow:0 0 10px rgba(0,0,0,0.2);
+                   z-index:1001; }
+    .toolbar { position:absolute; top:10px; right:10px; width:260px; background:white;
+               border-radius:4px; box-shadow:0 0 10px rgba(0,0,0,0.2); padding:10px; z-index:1000; }
+    .toolbar.collapsed .toolbar-content { display:none; }
+    .toolbar-header { display:flex; justify-content:space-between; align-items:center;
+                      border-bottom:1px solid #ccc; padding-bottom:5px; margin-bottom:10px; }
+    .symbol-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:10px; }
+    .symbol-btn { display:flex; flex-direction:column; align-items:center; justify-content:center;
+                  background:#f0f0f0; border:1px solid #ccc; border-radius:4px; padding:5px;
+                  cursor:pointer; height:50px; }
+    .symbol-btn.selected { background:#c5e1a5; border-color:#8bc34a; }
+    .symbol-btn svg { width:24px; height:24px; margin-bottom:3px; }
+    .draw-tools button, .file-tools button, #edit-description, #save-description {
+        margin:3px; padding:5px 8px; background:#f0f0f0; border:1px solid #ccc;
+        border-radius:4px; cursor:pointer; }
+    .draw-tools button.active { background:#c5e1a5; border-color:#8bc34a; }
+    .color-picker { margin-bottom:10px; }
+    .color-picker label { margin-right:5px; }
+    #description-popup { position:absolute; z-index:2000; background:white; border-radius:4px;
+                         box-shadow:0 0 10px rgba(0,0,0,0.3); padding:10px; width:280px; display:none; }
+    #description-popup .header { display:flex; justify-content:space-between; align-items:center;
+                                 margin-bottom:5px; }
+    #description-popup textarea { width:100%; height:80px; resize:vertical; padding:5px; }
   </style>
 </head>
 <body>
-  <div id="toolbar">
-    <h4>Symbols</h4>
-    <!-- standard list: mountain, bridge, lake, forest, river, city, volcano -->
-    <img src="icons/mountain.png" class="symbol" data-type="mountain" title="Mountain" />
-    <img src="icons/bridge.png" class="symbol" data-type="bridge" title="Bridge" />
-    <img src="icons/lake.png" class="symbol" data-type="lake" title="Lake" />
-    <img src="icons/forest.png" class="symbol" data-type="forest" title="Forest" />
-    <img src="icons/river.png" class="symbol" data-type="river" title="River" />
-    <img src="icons/city.png" class="symbol" data-type="city" title="City" />
-    <img src="icons/volcano.png" class="symbol" data-type="volcano" title="Volcano" />
-    <div><button id="deselect">Deselect</button></div>
+  <div id="map-container">
+    <div id="map"></div>
+    <div class="map-loading">Loading map...</div>
+  </div>
 
-    <h4>Region Color</h4>
-    <input type="color" id="colorPicker" value="#3388ff" />
-
-    <h4>Actions</h4>
-    <div id="actions">
-      <button id="snapshotBtn">Save Snapshot</button>
-      <button id="exportBtn">Export JSON</button>
-      <input type="file" id="importInput" accept="application/json" style="display:none" />
-      <button id="importBtn">Import JSON</button>
+  <div class="toolbar">
+    <div class="toolbar-header">
+      <strong>Map Tools</strong>
+      <button id="toggle-toolbar">▼</button>
+    </div>
+    <div class="toolbar-content">
+      <div><strong>Symbols</strong></div>
+      <div class="symbol-grid">
+        <!-- your symbol buttons... -->
+        <div class="symbol-btn" data-type="mountain"><svg viewBox="0 0 24 24"><path d="M22,23H2L12,3L22,23z" fill="#A0A0A0"/></svg><span>Mountain</span></div>
+        <div class="symbol-btn" data-type="forest"><svg viewBox="0 0 24 24"><path d="M12,2L6,12H9L5,18H19L15,12H18L12,2z" fill="#4CAF50"/></svg><span>Forest</span></div>
+        <div class="symbol-btn" data-type="river"><svg viewBox="0 0 24 24"><path d="M2,12 Q6,8 12,12 T22,12" stroke="#2196F3" fill="none" stroke-width="3"/></svg><span>River</span></div>
+        <div class="symbol-btn" data-type="lake"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#2196F3"/></svg><span>Lake</span></div>
+        <div class="symbol-btn" data-type="bridge"><svg viewBox="0 0 24 24"><path d="M7,14 L17,14 M7,10 L17,10 M5,14 L5,10 M19,14 L19,10" stroke="#795548" fill="none" stroke-width="2"/><path d="M5,14 C5,18 19,18 19,14" stroke="#795548" fill="none" stroke-width="1"/></svg><span>Bridge</span></div>
+        <div class="symbol-btn" data-type="city"><svg viewBox="0 0 24 24"><rect x="6" y="8" width="12" height="12" fill="#9E9E9E"/><rect x="9" y="4" width="6" height="4" fill="#9E9E9E"/></svg><span>City</span></div>
+        <div class="symbol-btn" data-type="deselect"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="red" fill="none" stroke-width="2"/><line x1="6" y1="6" x2="18" y2="18" stroke="red" stroke-width="2"/></svg><span>Deselect</span></div>
+      </div>
+      <div><strong>Draw / Edit</strong></div>
+      <div class="draw-tools">
+        <button id="polyline-btn">Line</button>
+        <button id="polygon-btn">Area</button>
+        <button id="edit-btn">Edit</button>
+        <button id="delete-btn">Delete</button>
+      </div>
+      <div class="color-picker">
+        <label for="feature-color">Color:</label>
+        <input type="color" id="feature-color" value="#3388ff">
+      </div>
+      <div class="file-tools">
+        <button id="export-png">PNG</button>
+        <button id="export-json">Export JSON</button>
+        <button id="import-json">Import JSON</button>
+      </div>
+      <input type="file" id="file-input" accept=".json" style="display:none">
     </div>
   </div>
-  <div id="map"></div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <!-- Leaflet Draw JS -->
-  <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+  <div id="description-popup">
+    <div class="header">
+      <strong>Description</strong>
+      <button id="close-popup">✕</button>
+    </div>
+    <textarea id="description-text" disabled></textarea>
+    <div>
+      <button id="edit-description">Edit</button>
+      <button id="save-description" style="display:none">Save</button>
+    </div>
+  </div>
+
   <script>
-    // Initialize map
-    var map = L.map('map').setView([20, 0], 2);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+    document.addEventListener('DOMContentLoaded', () => {
+      const map = L.map('map', { center: [20,0], zoom:2 });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors & CARTO'
+      }).addTo(map);
 
-    // Define custom icons (update iconUrl as needed)
-    var icons = {
-      mountain: L.icon({ iconUrl: 'icons/mountain.png', iconSize: [32,32] }),
-      bridge:   L.icon({ iconUrl: 'icons/bridge.png', iconSize: [32,32] }),
-      lake:     L.icon({ iconUrl: 'icons/lake.png', iconSize: [32,32] }),
-      forest:   L.icon({ iconUrl: 'icons/forest.png', iconSize: [32,32] }),
-      river:    L.icon({ iconUrl: 'icons/river.png', iconSize: [32,32] }),
-      city:     L.icon({ iconUrl: 'icons/city.png', iconSize: [32,32] }),
-      volcano:  L.icon({ iconUrl: 'icons/volcano.png', iconSize: [32,32] })
-    };
+      document.querySelector('.map-loading').style.display = 'none';
 
-    var selectedSymbol = null;
-    var selectedColor = document.getElementById('colorPicker').value;
-    var markerGroup = new L.FeatureGroup().addTo(map);
-    var drawItems   = new L.FeatureGroup().addTo(map);
+      const drawnItems = new L.FeatureGroup().addTo(map);
+      const state = {
+        selectedSymbol: null,
+        drawingMode: null,
+        editMode: false,
+        deleteMode: false,
+        activeFeature: null,
+        featureDescriptions: {}
+      };
 
-    // Symbol selection
-    document.querySelectorAll('.symbol').forEach(function(el) {
-      el.addEventListener('click', function() {
-        document.querySelectorAll('.symbol').forEach(s => s.classList.remove('selected'));
-        if (selectedSymbol === el.dataset.type) {
-          selectedSymbol = null;
+      // Icons:
+      const icons = {
+        mountain: L.divIcon({ html:'<svg viewBox="0 0 24 24" width="30" height="30"><path d="M22,23H2L12,3L22,23z" fill="#A0A0A0"/></svg>', iconSize:[30,30], iconAnchor:[15,15] }),
+        forest:  L.divIcon({ html:'<svg viewBox="0 0 24 24" width="30" height="30"><path d="M12,2L6,12H9L5,18H19L15,12H18L12,2z" fill="#4CAF50"/></svg>', iconSize:[30,30], iconAnchor:[15,15] }),
+        river:   L.divIcon({ html:'<svg viewBox="0 0 24 24" width="30" height="30"><path d="M2,12 Q6,8 12,12 T22,12" stroke="#2196F3" fill="none" stroke-width="3"/></svg>', iconSize:[30,30], iconAnchor:[15,15] }),
+        lake:    L.divIcon({ html:'<svg viewBox="0 0 24 24" width="30" height="30"><circle cx="12" cy="12" r="8" fill="#2196F3"/></svg>', iconSize:[30,30], iconAnchor:[15,15] }),
+        bridge:  L.divIcon({ html:'<svg viewBox="0 0 24 24" width="30" height="30"><path d="M7,14 L17,14 M7,10 L17,10 M5,14 L5,10 M19,14 L19,10" stroke="#795548" fill="none" stroke-width="2"/><path d="M5,14 C5,18 19,18 19,14" stroke="#795548" fill="none" stroke-width="1"/></svg>', iconSize:[30,30], iconAnchor:[15,15] }),
+        city:    L.divIcon({ html:'<svg viewBox="0 0 24 24" width="30" height="30"><rect x="6" y="8" width="12" height="12" fill="#9E9E9E"/><rect x="9" y="4" width="6" height="4" fill="#9E9E9E"/></svg>', iconSize:[30,30], iconAnchor:[15,15] })
+      };
+
+      // Toolbar elements
+      const toolbar       = document.querySelector('.toolbar');
+      const toggleBtn     = document.getElementById('toggle-toolbar');
+      const symbolBtns    = document.querySelectorAll('.symbol-btn');
+      const polylineBtn   = document.getElementById('polyline-btn');
+      const polygonBtn    = document.getElementById('polygon-btn');
+      const editBtn       = document.getElementById('edit-btn');
+      const deleteBtn     = document.getElementById('delete-btn');
+      const colorPicker   = document.getElementById('feature-color');
+      const descriptionPopup   = document.getElementById('description-popup');
+      const closePopupBtn = document.getElementById('close-popup');
+      const descriptionText   = document.getElementById('description-text');
+      const editDescBtn       = document.getElementById('edit-description');
+      const saveDescBtn       = document.getElementById('save-description');
+      const exportPngBtn      = document.getElementById('export-png');
+      const exportJsonBtn     = document.getElementById('export-json');
+      const importJsonBtn     = document.getElementById('import-json');
+      const fileInput         = document.getElementById('file-input');
+
+      // Toolbar toggle
+      toggleBtn.addEventListener('click', () => {
+        toolbar.classList.toggle('collapsed');
+        toggleBtn.textContent = toolbar.classList.contains('collapsed') ? '▲' : '▼';
+        setTimeout(()=>map.invalidateSize(),200);
+      });
+
+      // Symbol selection
+      symbolBtns.forEach(btn => btn.addEventListener('click', () => {
+        const type = btn.dataset.type;
+        symbolBtns.forEach(b=>b.classList.remove('selected'));
+        if (type==='deselect' || state.selectedSymbol===type) {
+          state.selectedSymbol = null;
+          map.getContainer().style.cursor = '';
         } else {
-          el.classList.add('selected');
-          selectedSymbol = el.dataset.type;
+          btn.classList.add('selected');
+          state.selectedSymbol = type;
+          map.getContainer().style.cursor = 'crosshair';
+        }
+      }));
+
+      // Place orphan symbol marker
+      map.on('click', e => {
+        if (state.selectedSymbol && !state.drawingMode && !state.editMode && !state.deleteMode) {
+          const marker = L.marker(e.latlng, { icon: icons[state.selectedSymbol], draggable:true });
+          marker.id = `sym_${Date.now()}`;
+          marker.symbolType = state.selectedSymbol;
+          drawnItems.addLayer(marker);
+          marker.on('click', evt=>{ L.DomEvent.stopPropagation(evt); showPopup(marker); });
+          marker.on('dragend', ()=>saveState());
         }
       });
-    });
-    document.getElementById('deselect').addEventListener('click', function() {
-      document.querySelectorAll('.symbol').forEach(s => s.classList.remove('selected'));
-      selectedSymbol = null;
-    });
 
-    // Color picker for polygons/polylines
-    var drawControl;
-    function initDrawControl() {
-      if (drawControl) map.removeControl(drawControl);
-      drawControl = new L.Control.Draw({
-        draw: {
-          polygon: { shapeOptions: { color: selectedColor } },
-          polyline:{ shapeOptions: { color: selectedColor } },
-          rectangle:false, circle:false, marker:false, circlemarker:false
-        },
-        edit: { featureGroup: drawItems }
+      // Activate drawing modes
+      function activateDrawingMode(mode) {
+        deactivateDrawingMode();
+        state.drawingMode = mode;
+        polylineBtn.classList.toggle('active', mode==='polyline');
+        polygonBtn.classList.toggle('active', mode==='polygon');
+        map.getContainer().style.cursor = 'crosshair';
+        const opts = { edit:false, draw:{ polyline:false, polygon:false, rectangle:false, circle:false, marker:false, circlemarker:false } };
+        if (mode==='polyline')
+          opts.draw.polyline = { shapeOptions:{ color:colorPicker.value, weight:4 } };
+        if (mode==='polygon')
+          opts.draw.polygon = { allowIntersection:false, showArea:true, shapeOptions:{ color:colorPicker.value, fillColor:colorPicker.value, fillOpacity:0.4, weight:4 } };
+        if (map.drawControl) map.removeControl(map.drawControl);
+        map.drawControl = new L.Control.Draw(opts);
+        map.addControl(map.drawControl);
+      }
+      function deactivateDrawingMode() {
+        [polylineBtn,polygonBtn,editBtn,deleteBtn].forEach(b=>b.classList.remove('active'));
+        state.drawingMode = null;
+        map.getContainer().style.cursor = '';
+        if (map.drawControl) { map.removeControl(map.drawControl); delete map.drawControl; }
+      }
+
+      polylineBtn.addEventListener('click', ()=> state.drawingMode==='polyline' ? deactivateDrawingMode() : activateDrawingMode('polyline'));
+      polygonBtn.addEventListener('click', ()=> state.drawingMode==='polygon' ? deactivateDrawingMode() : activateDrawingMode('polygon'));
+
+      // Edit & Delete modes
+      editBtn.addEventListener('click',()=>{
+        deactivateDrawingMode();
+        state.editMode = !state.editMode;
+        editBtn.classList.toggle('active', state.editMode);
+        state.deleteMode = false;
+        if (map.editControl) map.removeControl(map.editControl);
+        if (state.editMode) {
+          map.editControl = new L.Control.Draw({ edit:{ featureGroup:drawnItems, poly:{allowIntersection:false} }, draw:false });
+          map.addControl(map.editControl);
+        }
       });
-      map.addControl(drawControl);
-    }
-    initDrawControl();
-    document.getElementById('colorPicker').addEventListener('change', function(e) {
-      selectedColor = e.target.value;
-      initDrawControl();
-    });
-
-    // Place markers
-    map.on('click', function(e) {
-      if (!selectedSymbol) return;
-      var marker = L.marker(e.latlng, {
-        icon: icons[selectedSymbol],
-        draggable: true,
-        symbolType: selectedSymbol
-      }).addTo(markerGroup);
-      var popup = L.popup({ autoClose: false, closeOnClick: false })
-        .setContent('<div contenteditable="true" style="min-width:120px;">Describe...</div>');
-      marker.bindPopup(popup);
-      marker.on('click', function() { marker.openPopup(); });
-    });
-
-    // Handle drawings
-    map.on(L.Draw.Event.CREATED, function(evt) {
-      var layer = evt.layer;
-      drawItems.addLayer(layer);
-      var popup = L.popup({ autoClose: false, closeOnClick: false })
-        .setContent('<div contenteditable="true" style="min-width:120px;">Describe region...</div>');
-      layer.bindPopup(popup);
-      layer.on('click', function() { layer.openPopup(); });
-    });
-
-    // Snapshot
-    document.getElementById('snapshotBtn').addEventListener('click', function() {
-      html2canvas(document.getElementById('map')).then(canvas => {
-        canvas.toBlob(function(blob) {
-          var url = URL.createObjectURL(blob);
-          var a = document.createElement('a');
-          a.href = url;
-          a.download = 'map_snapshot.png';
-          a.click();
-          URL.revokeObjectURL(url);
-        });
+      deleteBtn.addEventListener('click',()=>{
+        deactivateDrawingMode();
+        state.deleteMode = !state.deleteMode;
+        deleteBtn.classList.toggle('active', state.deleteMode);
+        state.editMode = false;
+        if (map.deleteControl) map.removeControl(map.deleteControl);
+        if (state.deleteMode) {
+          map.deleteControl = new L.Control.Draw({ edit:{ featureGroup:drawnItems, remove:true }, draw:false });
+          map.addControl(map.deleteControl);
+        }
       });
-    });
 
-    // Export JSON state
-    document.getElementById('exportBtn').addEventListener('click', function() {
-      var state = { markers: [], shapes: [] };
-      markerGroup.eachLayer(function(m) {
-        var desc = m.getPopup().getContent();
-        state.markers.push({
-          type: m.options.symbolType,
-          latlng: m.getLatLng(),
-          description: desc
-        });
-      });
-      drawItems.eachLayer(function(l) {
-        var geo = l.toGeoJSON();
-        geo.properties = geo.properties || {};
-        geo.properties.description = l.getPopup().getContent();
-        geo.properties.color = l.options.color;
-        state.shapes.push(geo);
-      });
-      var dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(state));
-      var dl = document.createElement('a');
-      dl.setAttribute('href', dataStr);
-      dl.setAttribute('download', 'map_state.json');
-      dl.click();
-    });
+      // DRAW:CREATED → attach symbol & midpoint decorator
+      map.on('draw:created', e => {
+        const layer = e.layer;
+        layer.id = `${e.layerType}_${Date.now()}`;
+        layer.symbolType = state.selectedSymbol;
+        drawnItems.addLayer(layer);
 
-    // Import JSON state
-    document.getElementById('importBtn').addEventListener('click', function() {
-      document.getElementById('importInput').click();
-    });
-    document.getElementById('importInput').addEventListener('change', function(e) {
-      var file = e.target.files[0];
-      var reader = new FileReader();
-      reader.onload = function(evt) {
-        var data = JSON.parse(evt.target.result);
-        // Clear existing
-        markerGroup.clearLayers();
-        drawItems.clearLayers();
-        // Load markers
-        data.markers.forEach(function(m) {
-          var mk = L.marker(m.latlng, { icon: icons[m.type], draggable: true, symbolType: m.type })
-            .addTo(markerGroup);
-          var pop = L.popup({ autoClose:false, closeOnClick:false }).setContent(m.description);
-          mk.bindPopup(pop);
-          mk.on('click', function() { mk.openPopup(); });
+        // if polyline/polygon, drop a midpoint symbol-marker
+        if ((e.layerType==='polyline' || e.layerType==='polygon') && state.selectedSymbol) {
+          const latlngs = layer.getLatLngs();
+          const flat = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
+          const mid = flat[Math.floor(flat.length/2)];
+          const symMarker = L.marker(mid, {
+            icon: icons[state.selectedSymbol],
+            interactive: false
+          });
+          symMarker.id = `dec_${Date.now()}`;
+          symMarker._parentId = layer.id;
+          drawnItems.addLayer(symMarker);
+        }
+
+        layer.on('click', evt=>{ L.DomEvent.stopPropagation(evt); showPopup(layer); });
+        saveState();
+        deactivateDrawingMode();
+      });
+      map.on('draw:edited', ()=>saveState());
+      map.on('draw:deleted', e=>{
+        e.layers.eachLayer(l => {
+          if (l.id) delete state.featureDescriptions[l.id];
         });
-        // Load shapes
-        data.shapes.forEach(function(s) {
-          var layer = L.geoJSON(s, { style: { color: s.properties.color }}).getLayers()[0];
-          drawItems.addLayer(layer);
-          var pop = L.popup({ autoClose:false, closeOnClick:false }).setContent(s.properties.description);
-          layer.bindPopup(pop);
-          layer.on('click', function() { layer.openPopup(); });
+        saveState();
+      });
+
+      // Description popup logic
+      function showPopup(layer) {
+        state.activeFeature = layer;
+        const latlng = layer instanceof L.Marker
+          ? layer.getLatLng()
+          : layer.getBounds().getCenter();
+        const pt = map.latLngToContainerPoint(latlng);
+        descriptionPopup.style.left = pt.x + 20 + 'px';
+        descriptionPopup.style.top  = pt.y - 20 + 'px';
+        descriptionText.value = state.featureDescriptions[layer.id] || '';
+        descriptionText.disabled = true;
+        editDescBtn.style.display = 'inline-block';
+        saveDescBtn.style.display = 'none';
+        descriptionPopup.style.display = 'block';
+      }
+      closePopupBtn.addEventListener('click', ()=>{ descriptionPopup.style.display='none'; state.activeFeature=null; });
+      editDescBtn.addEventListener('click', ()=>{ descriptionText.disabled=false; descriptionText.focus(); editDescBtn.style.display='none'; saveDescBtn.style.display='inline-block'; });
+      saveDescBtn.addEventListener('click', ()=>{
+        if (state.activeFeature) {
+          state.featureDescriptions[state.activeFeature.id] = descriptionText.value;
+          saveState();
+        }
+        descriptionText.disabled = true;
+        editDescBtn.style.display = 'inline-block';
+        saveDescBtn.style.display = 'none';
+      });
+
+      // PNG Export
+      exportPngBtn.addEventListener('click', ()=>{
+        html2canvas(map.getContainer(),{backgroundColor:'#fff'}).then(canvas=>
+          canvas.toBlob(blob=>{
+            const url=URL.createObjectURL(blob),
+                  a=document.createElement('a');
+            a.href=url; a.download='map_snapshot.png';
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+          })
+        ).catch(()=>alert('PNG export failed'));
+      });
+
+      // STATE: save / load
+      function saveState(returnData=false) {
+        const features = [];
+        drawnItems.eachLayer(l=>{
+          let obj;
+
+          if (l instanceof L.Marker && !l._parentId) {
+            // orphan symbol
+            obj = {
+              id: l.id,
+              type: 'marker',
+              latlng: l.getLatLng(),
+              symbol: l.symbolType,
+              description: state.featureDescriptions[l.id]||''
+            };
+
+          } else if (l instanceof L.Polygon && !(l instanceof L.Polyline)) {
+            // polygon
+            obj = {
+              id: l.id,
+              type: 'polygon',
+              latlngs: l.getLatLngs(),
+              options: l.options,
+              symbol: l.symbolType,
+              description: state.featureDescriptions[l.id]||''
+            };
+
+          } else if (l instanceof L.Polyline) {
+            // polyline
+            obj = {
+              id: l.id,
+              type: 'polyline',
+              latlngs: l.getLatLngs(),
+              options: l.options,
+              symbol: l.symbolType,
+              description: state.featureDescriptions[l.id]||''
+            };
+
+          } else if (l instanceof L.Marker && l._parentId) {
+            // midpoint decorator
+            obj = {
+              id: l.id,
+              type: 'decorator',
+              latlng: l.getLatLng(),
+              parentId: l._parentId
+            };
+          }
+
+          if (obj) features.push(obj);
         });
-      };
-      reader.readAsText(file);
+
+        const data = {
+          map: { center: map.getCenter(), zoom: map.getZoom() },
+          features
+        };
+        localStorage.setItem('mapState', JSON.stringify(data));
+        return returnData? data : null;
+      }
+
+      function loadState(input) {
+        const data = typeof input==='string' ? JSON.parse(input) : input;
+        drawnItems.clearLayers();
+        state.featureDescriptions = {};
+
+        if (data.map) map.setView(data.map.center, data.map.zoom);
+
+        const decoratorQueue = [];
+        data.features.forEach(f=>{
+          let layer;
+          if (f.type==='marker') {
+            layer = L.marker(f.latlng, { icon: icons[f.symbol], draggable:true });
+            layer.id = f.id;
+            layer.symbolType = f.symbol;
+
+          } else if (f.type==='polyline') {
+            layer = L.polyline(f.latlngs, f.options);
+            layer.id = f.id;
+            layer.symbolType = f.symbol;
+
+          } else if (f.type==='polygon') {
+            layer = L.polygon(f.latlngs, f.options);
+            layer.id = f.id;
+            layer.symbolType = f.symbol;
+
+          } else if (f.type==='decorator') {
+            decoratorQueue.push(f);
+            return;
+          }
+
+          state.featureDescriptions[f.id] = f.description||'';
+          drawnItems.addLayer(layer);
+          layer.on('click', e=>{ L.DomEvent.stopPropagation(e); showPopup(layer); });
+          if (layer.dragging) layer.on('dragend', ()=>saveState());
+        });
+
+        // now add decorators
+        decoratorQueue.forEach(f=>{
+          const parent = Array.from(drawnItems.getLayers()).find(l=>l.id===f.parentId);
+          if (!parent) return;
+          const m = L.marker(f.latlng, { icon: icons[parent.symbolType], interactive:false });
+          m.id = f.id;
+          m._parentId = f.parentId;
+          drawnItems.addLayer(m);
+        });
+
+        saveState();
+      }
+
+      // Export / Import JSON
+      exportJsonBtn.addEventListener('click', ()=>{
+        const data = saveState(true);
+        const str = 'data:text/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(data));
+        const a = document.createElement('a');
+        a.href = str; a.download = 'map_data.json';
+        document.body.appendChild(a); a.click(); a.remove();
+      });
+
+      importJsonBtn.addEventListener('click', ()=>fileInput.click());
+      fileInput.addEventListener('change', e=>{
+        const file = e.target.files[0];
+        if (!file) return;
+        const r = new FileReader();
+        r.onload = ev => loadState(ev.target.result);
+        r.readAsText(file);
+      });
+
+      // load persisted on start
+      const saved = localStorage.getItem('mapState');
+      if (saved) loadState(saved);
     });
   </script>
 </body>
